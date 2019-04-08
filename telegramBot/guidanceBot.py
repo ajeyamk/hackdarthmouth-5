@@ -2,41 +2,45 @@ import json
 import requests
 import time
 import urllib
+import urllib3
 
 # TOKEN = "708703702:AAG1Kkk4R2h_ePrillz-5ADIoCoGEiIMSE0"
 TOKEN = "750446084:AAGWgtASCQwgiVNB5ZpbqOvR64uVtO2fuJ0"
 URL = "https://api.telegram.org/bot{}/".format(TOKEN)
+
 
 def get_url(url):
 	response = requests.get(url)
 	content = response.content.decode("utf8")
 	return content
 
+
 def get_json_from_url(url):
 	content = get_url(url)
 	js = json.loads(content)
 	return js
 
+
 # postData - sends student data in JSON request to python server
 def postData(gpa, score, schoolList):
 	print("\t\tReached the post request")
 	# data to be sent to api as JSON
-	jData = {
-		"data":{
-				"sat":score, # int in range 0-36 or 0-1600
-				"gpa":gpa, # float between 0.0 and 4.0
-				"colleges":schoolList
-			}
-		} # list of school names as strings
-	print("\t\tMade JSON")
-	# storing post request response (DON'T KNOW WHAT I'M DOING WITH LOADING)
-	import ipdb;ipdb.set_trace()
-	rawResponse = requests.post("http://172.21.199.216:5000/predict", jData)
-	print("\t\tPost request done")
-	response = json.loads( rawResponse )
-	print("\t\tResponse: ", response)
+	json_to_dump = {
+		"sat": score,
+		"gpa": gpa,
+		"colleges": schoolList
+	}
+	jsoned_data = json.dumps(json_to_dump)
+	http = urllib3.PoolManager()
+	r = http.request("POST", "http://127.0.0.1:9000/predict", body=jsoned_data, headers={'Content-Type': 'application/json'})
+	data = str(r.data)
+	print("\t\tYOU GOT MAIL!" + data[2:-1])
+	data = json.loads(data[2:-1])
+	print("\t\tMade JSON response")
+	print("\t\tResponse: ", data)
 	# return post response data
-	return response
+	return data
+
 
 # getEachChance - iterates over returned JSON object and returns list of chances
 def getEachChance(schoolData):
@@ -49,6 +53,7 @@ def getEachChance(schoolData):
 				probList.append( schoolData[data][school][chance] )
 	# return simple list of all probabilities
 	return probList
+
 
 # noneChance - calculate likelihood of getting into none of the schools
 def noneChance(schoolData):
@@ -63,17 +68,19 @@ def noneChance(schoolData):
 	# return probability that user gets into none of their chosen schools
 	return probNone
 
+
 # totalChance - calculates likelihood of getting into a given number of schools
 def totalChance(numCurious, schoolData):
 	# calculate probability that no acceptances happen
 	probNone = noneChance(schoolData)
 	# numCurious (one by default) minus probability of none happening
-	totProb = numCurious - curProb
+	totProb = numCurious - probNone
 	# return chance of getting into given number of schools out of chosen schools
 	return totProb
 
+
 # sendGivenStats - builds and sends a message with the results the user has given
-def sendGivenStats(gpaVal, actChoice, stdVal, chosenSchools):
+def sendGivenStats(updates, gpaVal, actChoice, stdVal, chosenSchools):
 	theirStats = "Here are the stats you gave me:\n\n"
 	# message about gpa
 	gpaMsg = "    GPA: " + str(gpaVal) + "\n"
@@ -99,31 +106,33 @@ def sendGivenStats(gpaVal, actChoice, stdVal, chosenSchools):
 	theirStats += schoolMsg
 	replyMessage(updates, theirStats)
 
+
 # sendResultsMessage - sends a formatted results message
 def sendResultsMessage(updates, schoolData, getOne, getNone):
 	global curStep # Current step in the interaction process
 	# initialize results string
 	resMsg = "Here is some info about your chances:\n\n"
-	resMsg += "  Chance of getting into each school:\n\n"
-	for data in schoolData:
-		for school in schoolData[data]:
-			# i know this is terrible progamming, go away
-			count = 0
-			for chance in schoolData[data][school]:
-				count += 1
-				# append each key and probability from JSON dict to results message
-				resMsg += "    " + schoolData[data][school] + ": "
-				resMsg += schoolData[data][school][chance]
-				# if not last of selected schools, add one newline
-				if ( count != len(schoolData[data][school]) ):
-					resMsg += "\n"
-				# end of college prob results
-				else:
-					resMsg += "\n\n"
-	resMsg += "  Chance of getting into at least one of the schools: " + getOne + "\n\n"
-	resMsg += "  Chance of not getting into any of the schools: " + getNone + "\n\n"
+	resMsg += "    Chance of getting into each school:\n"
+	data = schoolData['data']
+	colleges = data['colleges']
+	school_list = colleges.keys()
+	# i know this is terrible progamming, go away
+	count = 0
+	for x in school_list:
+		count += 1
+		resMsg += "        " + str(x) + ": "
+		resMsg += str(colleges[x] * 100)
+		if ( count != len(colleges) ):
+			resMsg += "%\n"
+		# end of college prob results
+		else:
+			resMsg += "%\n\n"
+	# import ipdb;ipdb.set_trace()
+	resMsg += "    Chance of getting into at least one of the schools: " + str(int(getOne * 100)) + "%\n\n"
+	resMsg += "    Chance of not getting into any of the schools: " + str(int(getNone * 100)) + "%\n\n"
 	# send the completed message
 	replyMessage(updates, resMsg)
+
 
 # resultsHandler - handles (through delegation) all results related stuff
 def resultsHandler(updates):
@@ -144,10 +153,10 @@ def resultsHandler(updates):
 	getNone = noneChance(returnData)
 	print("\t\tGot the chance of getting into no schools successfully")
 	# send message with given data
-	sendGivenStats(gpaVal, actChoice, stdVal, chosenSchools)
+	sendGivenStats(updates, gpaVal, actChoice, stdVal, chosenSchools)
 	print("\t\tSent given stats successfully")
 	# send message with calculated data
-	sendResultsMessage(updates, schoolData, getOne, getNone)
+	sendResultsMessage(updates, returnData, getOne, getNone)
 	print("\t\tSent results message successfully")
 	print("\tFinished handling results")
 
@@ -323,13 +332,18 @@ def collegeChoices(updates):
 			# set result to lowercase reply message
 			result = ( update["message"]["text"] ).lower()
 			# list of colleges we are allowing users to choose from
-			collegeOptions = ["Dartmouth", "Northeastern", "Colby"]
+			collegeOptions = ["Dartmouth", "Columbia", "Northeastern", "Princeton"]
 			# search for each school in the list
 			for i in range(len(collegeOptions)):
 				# if we find one of the schools in the response
 				if ( result.find(collegeOptions[i].lower()) != -1 ):
 					# add it to the list of chosen schools
-					chosenSchools.append(collegeOptions[i].lower())
+					toAppend = collegeOptions[i]
+					if (i <= 0):
+						toAppend += " College"
+					else:
+						toAppend += " University"
+					chosenSchools.append(toAppend)
 					return
 				# else if we find the word "done" in the response
 				elif ( result.find("done") != -1 ):
@@ -339,7 +353,7 @@ def collegeChoices(updates):
 					resultsHandler(updates)
 					print("Finished resultsHandler")
 					curStep = 5
-					# giveResults()
+					replyMessage(updates, "Not satisfied? Type anything to restart.")
 					return
 			# send message letting user know they've given an invalid school choice
 			replyMessage(updates,
@@ -352,6 +366,21 @@ def collegeChoices(updates):
 				"Sorry! Please type either a valid school name or the word 'done'")
 			# ensure that step value stays set to school choice interpreter
 			curStep = 4
+
+# startOver - helps start over the program
+def startOver(updates):
+	global curStep
+	global chosenSchools # container for chosen schools
+	global returnData # container for returned JSON
+	for update in updates["result"]:
+		msg = ["Okay, we'll restart.", "What's your GPA (on an unweighted 4.0 scale)?"]
+		replyMessage(updates, msg[0])
+		replyMessage(updates, msg[1])
+		# reset chosen schools and return data
+		chosenSchools = []
+		returnData = None
+		# update step value to gpa recorder
+		curStep = 1
 	
 def main():
 	last_update_id = None
@@ -387,7 +416,10 @@ def main():
 			# user sends college choices
 			elif (curStep == 4):
 				collegeChoices(updates)
+			elif (curStep == 5): # loop
+				startOver(updates) # loop
 		time.sleep(0.5)
 
 if __name__ == '__main__':
+	# postData(3.95, 1500, ["Dartmouth College"])
 	main()
