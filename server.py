@@ -7,6 +7,7 @@ from flask_cors import CORS
 
 app=Flask(__name__)
 CORS(app)
+app.config['CORS_HEADERS'] = 'Content-Type'
 
 @app.route('/predict', methods=['post'])
 def predict():
@@ -22,4 +23,4 @@ def predict():
 	return json.dumps(return_json)
 
 if __name__ == '__main__':
-	app.run(host= '0.0.0.0', port=9000, debug=False)
+	app.run(host="0.0.0.0",debug=True, port=9000)
